@@ -1,0 +1,19 @@
+# ── build artifacts ──────────────────────────────────────────────
+**/target/
+**/*.rs.bk
+
+# ── secrets / local state — NEVER commit DTLS private keys ─────────
+# lan-mouse generates its key+cert (PEM) on first run; keep them local.
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ── vendored Windows binaries (not committed — see windows/README) ─
+windows/lan-mouse/*.exe
+windows/Tools/*.exe
+
+# ── OS / editor cruft ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
