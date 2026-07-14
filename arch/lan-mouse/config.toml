@@ -1,0 +1,27 @@
+# lan-mouse config — ARCH side.
+# The peer configured here is the WINDOWS machine. Fill in its reachable IP and
+# its cert fingerprint (both are printed by lan-mouse on the Windows box on first
+# run — see the repo README, "Certificates & fingerprints are per-machine").
+
+port = 4242
+
+# Clipboard sharing over DTLS (sync-at-crossing). Requires the patched fork on
+# both ends; keep it true on both machines, or remove it from both — never one-sided.
+enable_clipboard = true
+
+release_bind = [
+    "KeyLeftCtrl",
+    "KeyLeftShift",
+    "KeyLeftMeta",
+    "KeyLeftAlt",
+]
+
+[[clients]]
+hostname = "win-pc"                        # your Windows peer's hostname
+ips = ["100.x.x.x"]                        # <-- your Windows peer's Tailscale (or LAN) IP
+position = "left"
+activate_on_startup = true
+
+[authorized_fingerprints]
+# <-- your Windows peer's cert fingerprint (SHA-256 of its cert DER, logged on startup)
+"aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99" = "win-pc"
