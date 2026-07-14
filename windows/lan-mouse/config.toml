@@ -1,0 +1,30 @@
+# lan-mouse config — WINDOWS side.
+# The peer configured here is the ARCH machine. Fill in its reachable IP and its
+# cert fingerprint (both are printed by lan-mouse on the Arch box on first run —
+# see the repo README, "Certificates & fingerprints are per-machine").
+
+port = 4242
+
+# Clipboard sharing over DTLS (sync-at-crossing). Requires the patched fork on
+# both ends; keep it true on both machines, or remove it from both — never one-sided.
+enable_clipboard = true
+
+release_bind = [
+    "KeyLeftCtrl",
+    "KeyLeftShift",
+    "KeyLeftMeta",
+    "KeyLeftAlt",
+]
+
+[[clients]]
+hostname = "arch-pc"                       # your Arch peer's hostname
+ips = ["100.x.x.x"]                        # <-- your Arch peer's Tailscale (or LAN) IP
+position = "right"
+# true => arm the right-edge barrier to the Arch peer at daemon startup, so you can
+# cross back to Arch immediately after a reboot with no manual activation. The DTLS
+# link itself is established on first crossing (the peer daemon just has to be listening).
+activate_on_startup = true
+
+[authorized_fingerprints]
+# <-- your Arch peer's cert fingerprint (SHA-256 of its cert DER, logged on startup)
+"aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99" = "arch-pc"
