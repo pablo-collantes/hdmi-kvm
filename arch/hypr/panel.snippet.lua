@@ -1,0 +1,19 @@
+-- ── lan-mouse status / restart panel ────────────────────────────────────
+-- Append to ~/.config/hypr/bindings.lua (install.sh does this for you).
+--
+-- IMPORTANT: Omarchy 4 ("Quattro") moved Hyprland config from .conf to .lua and
+-- no longer sources ~/.config/hypr/*.conf at all. A `bindd =` line in
+-- bindings.conf parses without error and is silently never registered — so on
+-- Quattro the binding MUST live here, in bindings.lua.
+--
+-- The link's status lives in the bar as an omarchy-shell plugin
+-- (arch/omarchy/plugins/pablo.lanmouse): the mouse icon turns red the moment
+-- either machine's daemon stops, and opening it names WHICH side is off with a
+-- one-click restart for each. This chord toggles that panel from the keyboard.
+--
+-- SUPER + ALT + R keeps the lan-mouse family on one modifier (H = switch
+-- monitor, P = lock pointer, \ = restart link, R = status panel).
+-- SUPER + CTRL + R — the more obvious chord — is already Omarchy's
+-- "Set reminder", and Hyprland keeps the FIRST binding registered for a chord,
+-- so a duplicate is silently ignored rather than overriding it.
+o.bind("SUPER + ALT + R", "lan-mouse: status / restart panel", "omarchy-shell pablo.lanmouse toggle")

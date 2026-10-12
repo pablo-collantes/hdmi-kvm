@@ -62,6 +62,8 @@ enum CaptureRequest {
     Reenable,
     /// set release bind
     SetReleaseBind(Vec<scancode::Linux>),
+    /// enable/disable "hold" (lock the pointer to the current screen)
+    SetHold(bool),
 }
 
 impl Capture {
@@ -89,6 +91,7 @@ impl Capture {
             release_bind: Rc::new(RefCell::new(release_bind)),
             sender,
             state: Default::default(),
+            hold: false,
         };
         let task = spawn_local(capture_task.run());
         Self {
@@ -144,6 +147,13 @@ impl Capture {
     pub(crate) fn set_release_bind(&mut self, bind: Vec<scancode::Linux>) {
         let _ = self.request_tx.send(CaptureRequest::SetReleaseBind(bind));
     }
+
+    /// Toggle "hold": while held, no new crossing is initiated (the barrier is
+    /// released back to local) and the active grab is kept even when the peer
+    /// signals `Leave` — i.e. the pointer stays locked to the current screen.
+    pub(crate) fn set_hold(&self, hold: bool) {
+        let _ = self.request_tx.send(CaptureRequest::SetHold(hold));
+    }
 }
 
 /// debounce a statement `$st`, i.e. the statement is executed only if the
@@ -177,6 +187,9 @@ struct CaptureTask {
     /// cloneable send half of `conn` for the clipboard-at-crossing push
     sender: LanMouseConnectionSender,
     state: State,
+    /// "hold": when true the pointer is locked to the current screen — no new
+    /// crossing starts and an active grab is not released on the peer's `Leave`.
+    hold: bool,
 }
 
 impl CaptureTask {
@@ -225,6 +238,7 @@ impl CaptureTask {
                         CaptureRequest::SetReleaseBind(bind) => {
                             self.release_bind.borrow_mut().clone_from(&bind);
                         }
+                        CaptureRequest::SetHold(h) => self.hold = h,
                     },
                     _ = self.cancellation_token.cancelled() => return,
                 }
@@ -298,8 +312,16 @@ impl CaptureTask {
                         }
                         // client disconnected
                         ProtoEvent::Leave(_) => {
-                            log::info!("releasing capture: left remote client device region");
-                            self.release_capture(capture).await?;
+                            if self.hold {
+                                // locked to the current screen: keep the grab so
+                                // the pointer stays on the remote peer. The peer
+                                // keeps emulating our input after sending Leave,
+                                // so control is unaffected.
+                                log::debug!("hold active: ignoring peer Leave — staying on remote screen");
+                            } else {
+                                log::info!("releasing capture: left remote client device region");
+                                self.release_capture(capture).await?;
+                            }
                         },
                         _ => {}
                     }
@@ -318,6 +340,7 @@ impl CaptureTask {
                     CaptureRequest::SetReleaseBind(bind) => {
                         self.release_bind.borrow_mut().clone_from(&bind);
                     }
+                    CaptureRequest::SetHold(h) => self.hold = h,
                 },
                 _ = self.cancellation_token.cancelled() => break,
             }
@@ -336,6 +359,15 @@ impl CaptureTask {
         if capture.keys_pressed(&self.release_bind.borrow()) {
             log::info!("releasing capture: release-bind pressed");
             return self.release_capture(capture).await;
+        }
+
+        // "hold" mode: stay locked to the current screen. If a barrier fires
+        // (Begin) while we're not already sending to a client, release it
+        // immediately so the pointer never crosses off this machine. (The
+        // release-bind above still works as an emergency escape hatch.)
+        if self.hold && matches!(event, CaptureEvent::Begin(_)) && self.active_client.is_none() {
+            log::debug!("hold active: suppressing edge-crossing — staying local");
+            return capture.release().await;
         }
 
         if matches!(event, CaptureEvent::Begin(_)) {

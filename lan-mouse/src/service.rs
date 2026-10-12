@@ -63,6 +63,8 @@ pub struct Service {
     capture_status: Status,
     /// status of input emulation (enabled / disabled)
     emulation_status: Status,
+    /// "hold" — pointer is locked to the current screen (toggled via SIGUSR1)
+    capture_held: bool,
     /// keep track of registered connections to avoid duplicate barriers
     incoming_conns: HashSet<SocketAddr>,
     /// map from capture handle to connection info
@@ -130,6 +132,7 @@ impl Service {
             pending_frontend_events: Default::default(),
             capture_status: Default::default(),
             emulation_status: Default::default(),
+            capture_held: false,
             incoming_conn_info: Default::default(),
             incoming_conns: Default::default(),
             next_trigger_handle: 0,
@@ -150,6 +153,17 @@ impl Service {
             self.activate_client(handle);
         }
 
+        // SIGUSR1 toggles capture "hold" (lock the pointer to the current
+        // screen); SIGUSR2 force-unlocks it. Unix-only — on other targets the
+        // awaited futures below never resolve, so the branches stay inert and
+        // the Windows cross-build still compiles.
+        #[cfg(unix)]
+        let mut sig_hold_toggle = signal::unix::signal(signal::unix::SignalKind::user_defined1())
+            .expect("failed to install SIGUSR1 handler");
+        #[cfg(unix)]
+        let mut sig_hold_off = signal::unix::signal(signal::unix::SignalKind::user_defined2())
+            .expect("failed to install SIGUSR2 handler");
+
         loop {
             tokio::select! {
                 request = self.frontend_listener.next() => self.handle_frontend_request(request),
@@ -158,6 +172,18 @@ impl Service {
                 event = self.capture.event() => self.handle_capture_event(event),
                 event = self.resolver.event() => self.handle_resolver_event(event),
                 _ = self.config.changed() => self.handle_config_change(),
+                _ = async {
+                    #[cfg(unix)]
+                    { sig_hold_toggle.recv().await; }
+                    #[cfg(not(unix))]
+                    { std::future::pending::<()>().await; }
+                } => self.set_capture_hold(!self.capture_held),
+                _ = async {
+                    #[cfg(unix)]
+                    { sig_hold_off.recv().await; }
+                    #[cfg(not(unix))]
+                    { std::future::pending::<()>().await; }
+                } => self.set_capture_hold(false),
                 r = signal::ctrl_c() => break r.expect("failed to wait for CTRL+C"),
             }
         }
@@ -171,6 +197,31 @@ impl Service {
         self.resolver.terminate().await;
 
         Ok(())
+    }
+
+    /// Toggle/set "hold": lock the pointer to the current screen. Forwards the
+    /// state to the capture task and shows a desktop notification (best-effort).
+    fn set_capture_hold(&mut self, held: bool) {
+        if self.capture_held == held {
+            return;
+        }
+        self.capture_held = held;
+        self.capture.set_hold(held);
+        log::info!(
+            "capture hold {}",
+            if held { "ENABLED — locked to current screen" } else { "disabled" }
+        );
+        let (title, body) = if held {
+            ("lan-mouse: Locked 🔒", "Input locked to this screen — hotkey again to unlock")
+        } else {
+            ("lan-mouse: Unlocked 🔓", "Edge-crossing re-enabled")
+        };
+        let _ = Command::new("notify-send")
+            .arg("-a")
+            .arg("lan-mouse KVM")
+            .arg(title)
+            .arg(body)
+            .spawn();
     }
 
     fn handle_frontend_request(&mut self, request: Option<Result<FrontendRequest, IpcError>>) {

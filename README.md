@@ -60,6 +60,23 @@ machine writes that register:
 | `Super+Alt+H` | Arch | monitor → Windows (HDMI) | `ddcutil` |
 | `Win+Alt+H`   | Windows | monitor → Arch (DisplayPort) | NirSoft `ControlMyMonitor.exe` |
 
+The rest of the hotkeys drive the input half, and are deliberately on the **same
+modifier** so the whole KVM lives under one chord family. `Super` and `Win` are the same
+scancode, so each row is one physical gesture that works from either machine:
+
+| Press | Effect |
+|-------|--------|
+| `Super/Win + Alt + P` | **Lock** the pointer to the screen you're on — no crossing in *or* out. Press again to unlock. |
+| `Super/Win + Alt + \` | Unlock and re-arm the link, if it ever gets stuck. |
+| `Ctrl + Shift + Alt + Space` | Emergency release, checked capture-side so it fires even when the pointer is stranded on the peer. |
+| `Win + Alt + M` | *Windows only* — force the cursor visible again (see Mouse Keys, below). |
+
+The status panel is the one chord that **isn't** symmetric: `Super+Alt+R` on Arch,
+`Ctrl+Win+R` on Windows. `Super+Ctrl+R` would have been the obvious match, but it is
+already Omarchy's "Set reminder", and Hyprland keeps the *first* binding registered for a
+chord — so a duplicate is silently ignored rather than overriding it. Better an asymmetric
+key than a keybind that does nothing with no diagnostic.
+
 **Design principle — *each machine switches the monitor away from itself*.** The DDC
 write always travels over the machine's **own, currently-active** video link (which is
 guaranteed up, because that machine is the one you're looking at), so it's reliable
@@ -155,6 +172,30 @@ the Windows backends select themselves via `#[cfg(windows)]`. This required spli
 `arboard` target-specifically in `Cargo.toml` (`wayland-data-control` only on
 `cfg(target_os = "linux")`, plain `arboard` elsewhere) so the cross build links cleanly.
 
+### 6. Pointer lock ("hold") — a capture-side freeze, driven by signals
+
+Crossing is *too* easy when you're working on one machine and keep clipping the shared
+edge. Upstream has no way to pin the pointer, so the fork adds a **hold** state to the
+capture task (`CaptureRequest::SetHold`, [`lan-mouse/src/capture.rs`](lan-mouse/src/capture.rs)):
+while held, no new crossing is initiated **and** an active grab survives the peer's
+`Leave`, so the pointer can be neither pushed out nor dragged back.
+
+It's toggled over **`SIGUSR1`** (toggle) and **`SIGUSR2`** (force-unlock) rather than a
+new IPC verb, which keeps it a few lines in the service loop and makes it trivially
+scriptable — `kill -USR1 $(pidof lan-mouse)`. The handlers are `#[cfg(unix)]`-gated so
+the Windows cross-build still compiles, with the awaited futures left inert on other
+targets.
+
+Hold is only half the story, because the barrier belongs to whichever machine the mouse
+is *physically plugged into* — which can be either box.
+[`arch/hypr/scripts/lanmouse-kvm.sh`](arch/hypr/scripts/lanmouse-kvm.sh) therefore acts on
+**both** ends from a single script: it deactivates the peer client over the Arch daemon's
+Unix-socket CLI, and stops the Windows daemon outright. (Windows needs the blunter
+approach: lan-mouse's fire-and-forget CLI requests like `activate`/`deactivate` don't
+survive the TCP socket close there — only request/response calls such as `list` do — so
+it's `taskkill` plus a relaunch via a scheduled task.) Both machines' hotkeys run this
+one script, so there is a single source of truth for the lock state.
+
 ---
 
 ## Hard problems solved along the way
@@ -188,6 +229,28 @@ elimination:
   only practical way to debug a machine you can't sit in front of. An interactive
   scheduled task lets the whole thing be **restarted over SSH** after pushing a new build.
 
+- **The status panel couldn't restart the daemon it was monitoring.** The panel launches
+  from the Startup shortcut, so it runs at **medium** integrity — and a medium-integrity
+  process cannot `taskkill` the High-integrity daemon. `taskkill` returns *"Access is
+  denied"* and the Restart button silently does nothing. *Triggering* a scheduled task,
+  though, is permitted from medium integrity, so the panel calls a `LanMouseKick` task
+  that does the kill-and-relaunch at the elevated principal instead.
+
+- **Nothing can type into the Windows sign-in screen — so don't try.** The lock and
+  sign-in screens are a separate secure desktop (`WinSta0\Winlogon`) and nothing on
+  `WinSta0\Default` may touch it, which means lan-mouse fundamentally cannot drive them.
+  Rather than fighting that boundary, `LanMouseConsoleConnect` makes the lock screen *go
+  away*: it reattaches the session to the physical console with `tscon /dest:console`.
+  Its principal has to be **SYSTEM** — `tscon` refuses `/dest:console` even for an
+  elevated administrator token — but *triggering* a task needs no privilege at all, so
+  the Arch box drives recovery over plain SSH with no credentials anywhere.
+
+- **Omarchy 4 silently stopped reading `.conf`.** Omarchy's "Quattro" release moved
+  Hyprland config from `.conf` to Lua and no longer sources `~/.config/hypr/*.conf` at
+  all. A `bindd =` line there still *parses* without error and is then simply never
+  registered — a keybind that fails with no diagnostic anywhere. The installer appends to
+  `bindings.lua` when it detects Quattro and keeps the `.conf` path for older installs.
+
 If you're a reviewer skimming for depth: `windows/install.ps1` and the fork's
 `input-capture` / `input-emulation` / `lan-mouse-proto` crates are where the substance is.
 
@@ -197,19 +260,29 @@ If you're a reviewer skimming for depth: `windows/install.ps1` and the fork's
 
 ```
 .
-├── arch/                    # Arch Linux (Hyprland / Wayland) side
-│   ├── install.sh           #   build lan-mouse + install config, scripts, keybind, autostart
+├── arch/                       # Arch Linux (Hyprland / Wayland) side
+│   ├── install.sh              #   build lan-mouse + install config, scripts, keybind, widget
 │   ├── hypr/
-│   │   ├── scripts/         #   switch-to-windows.sh, find-hdmi.sh, monitors-off.sh
-│   │   ├── bindings.snippet.conf
+│   │   ├── scripts/
+│   │   │   ├── switch-to-windows.sh   # the DDC/CI monitor flip
+│   │   │   ├── lanmouse-kvm.sh        # pointer lock / unlock / restart, both machines
+│   │   │   ├── lanmouse-ctl.sh        # status, restart, and cold-boot recovery
+│   │   │   ├── find-hdmi.sh           # discover your monitor's VCP input values
+│   │   │   └── monitors-off.sh
+│   │   ├── bindings.snippet.conf      # keybinds (pre-Quattro .conf installs)
+│   │   ├── panel.snippet.lua          # status-panel keybind (Omarchy 4 "Quattro" .lua)
 │   │   └── autostart.snippet.conf
-│   └── lan-mouse/config.toml #   DTLS peer, screen position, authorized fingerprint (template)
-├── windows/                 # Windows 11 side
-│   ├── install.ps1          #   Tools, Mouse Keys, firewall, hidden daemon, scheduled tasks
-│   ├── cross-build-exe.sh   #   cross-compile lan-mouse.exe (run on the Arch box)
-│   ├── Tools/               #   switch-to-arch.bat, switch-hotkey.ahk, enable-mousekeys.*
-│   └── lan-mouse/config.toml #   template
-├── lan-mouse/               # VENDORED patched lan-mouse source (builds on Arch + Windows)
+│   ├── omarchy/plugins/pablo.lanmouse/  # bar widget: link status + one-click restart
+│   └── lan-mouse/config.toml   #   DTLS peer, screen position, fingerprint (template)
+├── windows/                    # Windows 11 side
+│   ├── install.ps1             #   Tools, Mouse Keys, firewall, hidden daemon, 5 tasks
+│   ├── cross-build-exe.sh      #   cross-compile lan-mouse.exe (run on the Arch box)
+│   ├── Tools/                  #   switch-to-arch.bat, switch-hotkey.ahk, enable-mousekeys.*
+│   └── lan-mouse/
+│       ├── config.toml         #   template
+│       └── console-connect.ps1 #   unlock via tscon, so the Arch box can recover the link
+├── lan-mouse/                  # VENDORED patched lan-mouse source (builds on Arch + Windows)
+├── LICENSE                     # GPL-3.0 (inherited from lan-mouse; applies repo-wide)
 └── README.md
 ```
 
@@ -244,8 +317,27 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 .\install.ps1
 ```
 
-Then set your monitor serial in `C:\Tools\switch-to-arch.bat`, log out/in, and verify:
+Then set your monitor serial in `C:\Tools\switch-to-arch.bat`, and point
+`ArchSSH` in `C:\Tools\switch-hotkey.ahk` at your Arch box. Log out/in, and verify:
 `Get-Process lan-mouse`, then press `Win+Alt+H`.
+
+**Checking it from either side.** `arch/hypr/scripts/lanmouse-ctl.sh status` reports both
+daemons and whether crossing is armed, and is also what the bar widget and the Windows
+panel call underneath:
+
+```bash
+./arch/hypr/scripts/lanmouse-ctl.sh status         # both machines, one line each
+./arch/hypr/scripts/lanmouse-ctl.sh probe          # machine-readable, for scripts
+./arch/hypr/scripts/lanmouse-ctl.sh restart-both   # re-arm the link end to end
+```
+
+On **Omarchy 4+** `install.sh` also installs a bar widget (`arch/omarchy/plugins/`) that
+turns red the moment either daemon stops and names which side is down. On other setups
+that step is skipped automatically and the scripts above are the interface.
+
+Every host-specific value is an **environment variable with a placeholder default** —
+`LAN_MOUSE_WIN_HOST`, `LAN_MOUSE_WIN_USER`, `LAN_MOUSE_CLIENT`, `LAN_MOUSE_BIN` — so you
+can point the scripts at your own machines without editing them.
 
 ---
 

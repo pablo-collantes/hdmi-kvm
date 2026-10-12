@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "pablo.lanmouse",
+  "name": "lan-mouse",
+  "version": "1.0.0",
+  "author": "pablo-collantes",
+  "license": "GPL-3.0-or-later",
+  "description": "lan-mouse KVM link status for both machines, with one-click restart of either daemon.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "lan-mouse",
+    "description": "Shows whether each machine's lan-mouse daemon is running and crossing is armed; restart either side or both.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 30,
+      "peerName": "Windows"
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 5,
+        "max": 3600,
+        "step": 5,
+        "defaultValue": 30
+      },
+      {
+        "key": "peerName",
+        "type": "string",
+        "label": "Peer display name",
+        "defaultValue": "Windows"
+      }
+    ]
+  }
+}

@@ -57,5 +57,47 @@ add_snippet() {
 add_snippet "$CONFIG/hypr/bindings.conf"  "switch-to-windows.sh"        "$SCRIPT_DIR/hypr/bindings.snippet.conf"
 add_snippet "$CONFIG/hypr/autostart.conf" "lan-mouse --capture-backend" "$SCRIPT_DIR/hypr/autostart.snippet.conf"
 
+# 6. omarchy-shell bar widget + its keybind (Omarchy 4 "Quattro" and newer)
+#
+# NOTE ON QUATTRO: Omarchy 4 moved Hyprland config from .conf to .lua and no
+# longer sources ~/.config/hypr/*.conf at all. The two add_snippet calls above
+# still target the .conf files for pre-Quattro installs, but on Quattro those
+# lines parse cleanly and are then silently NEVER registered — the equivalents
+# have to live in bindings.lua / autostart.lua. Check yours if a keybind or the
+# daemon autostart appears to do nothing.
+if command -v omarchy-shell >/dev/null 2>&1; then
+  say "Installing the lan-mouse bar widget (omarchy-shell plugin) ..."
+  mkdir -p "$CONFIG/omarchy/plugins"
+  rm -rf "$CONFIG/omarchy/plugins/pablo.lanmouse"
+  cp -r "$SCRIPT_DIR/omarchy/plugins/pablo.lanmouse" "$CONFIG/omarchy/plugins/"
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  # rescanPlugins discovers NEW plugins but will not pick up edited QML: Omarchy
+  # deliberately disables Quickshell's own file-watching reload, and Qt caches
+  # components by URL, so a changed Panel.qml keeps serving the old code until
+  # the engine restarts. Re-running this installer after an edit is a no-op
+  # without this. (Not omarchy-refresh-shell — that resets shell.json to
+  # defaults and would wipe the user's bar layout.)
+  omarchy-restart-shell >/dev/null 2>&1 || true
+  if omarchy plugin enable pablo.lanmouse >/dev/null 2>&1; then
+    say "Bar widget installed and enabled (pablo.lanmouse)."
+  else
+    warn "Widget copied but not enabled — run: omarchy plugin enable pablo.lanmouse"
+  fi
+
+  if [ -e "$CONFIG/hypr/bindings.lua" ]; then
+    if grep -qF "pablo.lanmouse" "$CONFIG/hypr/bindings.lua"; then
+      say "Panel keybind already present in bindings.lua — skipping."
+    else
+      { printf '\n'; cat "$SCRIPT_DIR/hypr/panel.snippet.lua"; } >> "$CONFIG/hypr/bindings.lua"
+      say "Appended the SUPER+ALT+R panel keybind to bindings.lua."
+    fi
+  else
+    warn "No $CONFIG/hypr/bindings.lua — add the binding from hypr/panel.snippet.lua by hand."
+  fi
+else
+  warn "omarchy-shell not found — skipping the bar widget (it needs Omarchy 4+)."
+fi
+
 say "Done. Reload Hyprland (or re-login) to pick up the keybind + autostart."
 say "Verify the peer link with:  lan-mouse cli list"
+say "Check both machines at once with:  hypr/scripts/lanmouse-ctl.sh status"
