@@ -30,7 +30,10 @@ Say "Installing lan-mouse config ..."
 $cfgDst = Join-Path $Lm 'config.toml'
 if (Test-Path $cfgDst) { Copy-Item $cfgDst "$cfgDst.bak" -Force; Warn "Existing config backed up to config.toml.bak" }
 Copy-Item (Join-Path $Here 'lan-mouse\config.toml') $cfgDst -Force
-Warn "EDIT $cfgDst: set the peer IP under [[clients]] and its cert fingerprint under [authorized_fingerprints]."
+# ${cfgDst} must be brace-delimited: a bare "$cfgDst:" is parsed as a scope
+# qualifier (as in $env:PATH), and since PowerShell refuses to run a file that
+# fails to parse, that one colon aborts the whole installer before line 1.
+Warn "EDIT ${cfgDst}: set the peer IP under [[clients]] and its cert fingerprint under [authorized_fingerprints]."
 
 Say "Enabling Mouse Keys (makes the injected cursor visible with no physical mouse) ..."
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Tools 'enable-mousekeys.ps1')

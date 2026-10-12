@@ -10,10 +10,16 @@ port = 4242
 enable_clipboard = true
 
 release_bind = [
+    # Ctrl + Shift + Alt + Space, held together, on the machine that currently
+    # HAS the mouse. Emergency escape hatch: it is checked on the capture side
+    # before events are forwarded, so it still fires when the pointer is stuck
+    # on the peer. Deliberately NOT Meta/Super — the Win key opens the Start
+    # menu on Windows and is Hyprland's primary modifier on Arch, so a chord
+    # containing it has side effects on whichever box you are trying to escape.
     "KeyLeftCtrl",
     "KeyLeftShift",
-    "KeyLeftMeta",
     "KeyLeftAlt",
+    "KeySpace",
 ]
 
 [[clients]]

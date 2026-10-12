@@ -274,6 +274,7 @@ The `lan-mouse/` subtree is a patched copy of
 its `LICENSE` is preserved in-tree, and all modifications are described above. Huge thanks
 to the upstream project — it does the hard part.
 
-The integration glue in this repo — the DDC switch scripts, install automation, hypr
-snippets, and the fork patches themselves — is provided as-is for anyone building a
-similar single-monitor, two-machine desk.
+The integration glue in this repo — the DDC switch scripts, install automation, and hypr
+snippets — is licensed **GPL-3.0-or-later** as well, so the repository is GPL-3.0-or-later
+as a whole and the root [`LICENSE`](LICENSE) applies to all of it. Use it, fork it, build
+your own two-machine desk with it.
